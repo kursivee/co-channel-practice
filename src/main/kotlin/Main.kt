@@ -7,7 +7,11 @@ import kotlin.coroutines.CoroutineContext
 data class Order(
     val name: String,
     val type: String,
-    var barista: String = ""
+    var barista: Barista? = null
+)
+
+data class Barista(
+    val name: String
 )
 
 fun CoroutineScope.produceOrder(orders: List<Order>) = produce {
@@ -28,43 +32,38 @@ fun main() {
         Order("S","Macaron"),
         Order("S","Bacon")
     )
+    val baristas = listOf(
+        Barista("Michael Scott"),
+        Barista("Dwight Schrute"),
+        Barista("Pam Beesly")
+    )
     runBlocking {
         val queue = produceOrder(orders)
-        launch {
-            for(i in queue) {
-                i.barista = "Michael Scott"
-                printz(processOrder(i, "Michael Scott"))
-            }
-        }
-        launch {
-            for(i in queue) {
-                i.barista = "Dwight Schrute"
-                printz(processOrder(i, "Dwight Schrute"))
-            }
-        }
-        launch {
-            for(i in queue) {
-                i.barista = "Pam Beesly"
-                printz(processOrder(i, "Dwight Schrute"))
+        baristas.forEach {
+            launch {
+                for(order in queue) {
+                    order.barista = it
+                    printz(processOrder(order))
+                }
             }
         }
     }
 }
 
-suspend fun processOrder(order: Order, id: String): String {
+suspend fun processOrder(order: Order): String {
     delay(300)
-    printz("${order.barista} - ${order.type} for ${order.name} being made")
+    printz("${order.barista!!.name} - ${order.type} for ${order.name} being made")
     return makingOrder(order)
 }
 
 suspend fun makingOrder(order: Order): String {
-    printz("${order.barista} - Making ${order.type} for ${order.name}")
+    printz("${order.barista!!.name} - Making ${order.type} for ${order.name}")
     coroutineScope {
         async {
             BeverageMaker.pour(order)
         }
     }.await()
-    return "${order.barista} - ${order.type} for ${order.name} ready!"
+    return "${order.barista!!.name} - ${order.type} for ${order.name} ready!"
 }
 
 data class BeverageRequest(
@@ -97,9 +96,9 @@ object BeverageMaker: CoroutineScope {
      */
     private val pourer1: SendChannel<BeverageRequest> = actor {
         consumeEach {
-            printz("${it.order.barista} - Pouring ${it.order.type} on pourer 1")
+            printz("${it.order.barista!!.name} - Pouring ${it.order.type} on pourer 1")
             delay((Math.random() * 10000 + 2000).toLong())
-            printz("${it.order.barista} - Pouring ${it.order.type} Complete")
+            printz("${it.order.barista!!.name} - Pouring ${it.order.type} Complete")
             it.channel.send(true)
             it.channel.close()
         }
@@ -107,9 +106,9 @@ object BeverageMaker: CoroutineScope {
 
     private val pourer2: SendChannel<BeverageRequest> = actor {
         consumeEach {
-            printz("${it.order.barista} - Pouring ${it.order.type} on pourer 2")
+            printz("${it.order.barista!!.name} - Pouring ${it.order.type} on pourer 2")
             delay((Math.random() * 10000 + 2000).toLong())
-            printz("${it.order.barista} - Pouring ${it.order.type} Complete")
+            printz("${it.order.barista!!.name} - Pouring ${it.order.type} Complete")
             it.channel.send(true)
             it.channel.close()
         }
@@ -123,7 +122,7 @@ object BeverageMaker: CoroutineScope {
          * Select waits for the pourer to complete. Complete == channel.close()
          */
         select<Unit> {
-            printz("${order.barista} - Waiting to pour")
+            printz("${order.barista!!.name} - Waiting to pour")
             val channel = Channel<Boolean>()
             pourer1.onSend(BeverageRequest(order, channel)) {
                 channel.receive()

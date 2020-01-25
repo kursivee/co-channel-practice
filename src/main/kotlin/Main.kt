@@ -77,7 +77,7 @@ object BeverageMaker: CoroutineScope {
 
     /**
      * Still don't have a proper mental model of actor but it seems like it's just a coroutine with single responsibility.
-     * In this case, the actor is a pourer who's job is to indicate when pouring is complete
+     * In this case, the actor is a pourer whose job is to indicate when pouring is complete
      *
      * Adding capacity to actor will add a buffer. Essentially a queue of size [capacity] will form behind the actor.
      * Example:

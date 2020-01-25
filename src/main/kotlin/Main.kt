@@ -42,6 +42,12 @@ fun main() {
                 printz(processOrder(i, "Dwight Schrute"))
             }
         }
+        launch {
+            for(i in queue) {
+                i.barista = "Pam Beesly"
+                printz(processOrder(i, "Dwight Schrute"))
+            }
+        }
     }
 }
 
@@ -70,7 +76,25 @@ object BeverageMaker: CoroutineScope {
     // How does coroutineContext affect implementation
     override val coroutineContext: CoroutineContext = Job()
 
-    // Investigate what actor does
+    /**
+     * Still don't have a proper mental model of actor but it seems like it's just a coroutine with single responsibility.
+     * In this case, the actor is a pourer who's job is to indicate when pouring is complete
+     *
+     * Adding capacity to actor will add a buffer. Essentially a queue of size [capacity] will form behind the actor.
+     * Example:
+     * When setting capacity to 0
+     * pourer1 queue = [Michael Scott]
+     * pourer2 queue = [Dwight Scrute]
+     * In this case Pam Beesly is in the "selection zone". She has not committed to any queue as of yet.
+     *
+     * When setting capacity to 1
+     * pourer1 queue = [Michael Scott, Dwight Scrute]
+     * pourer2 queue = [Pam Beesly]
+     *
+     * * When setting capacity to 2
+     * pourer1 queue = [Michael Scott, Dwight Scrute, Pam Beesly]
+     * pourer2 queue = []
+     */
     private val pourer1: SendChannel<BeverageRequest> = actor {
         consumeEach {
             printz("${it.order.barista} - Pouring ${it.order.type} on pourer 1")
@@ -92,7 +116,12 @@ object BeverageMaker: CoroutineScope {
     }
 
     suspend fun pour(order: Order) {
-        // Investigate what select does
+        /**
+         * For mental model purposes I'm calling this the "selection zone". Another analogy would be when you are
+         * figuring out the shortest line to go to to pay for your groceries.
+         * 
+         * Select waits for the pourer to complete. Complete == channel.close()
+         */
         select<Unit> {
             printz("${order.barista} - Waiting to pour")
             val channel = Channel<Boolean>()
@@ -107,5 +136,5 @@ object BeverageMaker: CoroutineScope {
 }
 
 fun printz(s: String) {
-    println("[${LocalDateTime.now()}] $s")
+    println("[${LocalDateTime.now()}][${Thread.currentThread().name}] $s")
 }

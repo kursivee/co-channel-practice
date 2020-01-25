@@ -97,7 +97,7 @@ object BeverageMaker: CoroutineScope {
     private fun initPourer(name: String, capacity: Int = 0): SendChannel<BeverageRequest> = actor(capacity = capacity) {
         consumeEach {
             printz("${it.order.barista!!.name} - Pouring ${it.order.type} on pourer $name")
-            delay((Math.random() * 10000 + 2000).toLong())
+            wait(2, 10)
             printz("${it.order.barista!!.name} - Pouring ${it.order.type} Complete")
             it.channel.send(true)
             it.channel.close()
@@ -105,7 +105,7 @@ object BeverageMaker: CoroutineScope {
     }
 
     private val pourers = listOf(
-        initPourer("pourer 1", 2),
+        initPourer("pourer 1"),
         initPourer("pourer 2")
     )
 
@@ -134,4 +134,8 @@ object BeverageMaker: CoroutineScope {
 
 fun printz(s: String) {
     println("[${LocalDateTime.now()}][${Thread.currentThread().name}] $s")
+}
+
+suspend fun wait(min: Int, max: Int) {
+    delay((Math.random() * (max * 1000) + (min * 1000)).toLong())
 }

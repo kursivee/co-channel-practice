@@ -60,7 +60,7 @@ suspend fun makingOrder(order: Order): String {
     printz("${order.barista!!.name} - Making ${order.type} for ${order.name}")
     coroutineScope {
         async {
-            BeverageMaker.pour(order)
+            BeverageMaker.queue(order)
         }
     }.await()
     return "${order.barista!!.name} - ${order.type} for ${order.name} ready!"
@@ -109,7 +109,7 @@ object BeverageMaker: CoroutineScope {
         initPourer("pourer 2")
     )
 
-    suspend fun pour(order: Order) {
+    suspend fun queue(order: Order) {
         /**
          * For mental model purposes I'm calling this the "selection zone".
          * Some grocery stores have a dedicated person to facilitate which queue a customer goes to.
@@ -121,7 +121,7 @@ object BeverageMaker: CoroutineScope {
          * Select waits for the pourer to complete. Complete == channel.close()
          */
         select<Unit> {
-            printz("${order.barista!!.name} - Waiting to pour")
+            printz("${order.barista!!.name} - Waiting for open pourer")
             val channel = Channel<Boolean>()
             pourers.forEach {
                 it.onSend(BeverageRequest(order, channel)) {

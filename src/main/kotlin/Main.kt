@@ -94,9 +94,9 @@ object BeverageMaker: CoroutineScope {
      * pourer1 queue = [Michael Scott, Dwight Scrute, Pam Beesly]
      * pourer2 queue = []
      */
-    private val pourer1: SendChannel<BeverageRequest> = actor {
+    private fun initPourer(name: String, capacity: Int = 0): SendChannel<BeverageRequest> = actor(capacity = capacity) {
         consumeEach {
-            printz("${it.order.barista!!.name} - Pouring ${it.order.type} on pourer 1")
+            printz("${it.order.barista!!.name} - Pouring ${it.order.type} on pourer $name")
             delay((Math.random() * 10000 + 2000).toLong())
             printz("${it.order.barista!!.name} - Pouring ${it.order.type} Complete")
             it.channel.send(true)
@@ -104,15 +104,10 @@ object BeverageMaker: CoroutineScope {
         }
     }
 
-    private val pourer2: SendChannel<BeverageRequest> = actor {
-        consumeEach {
-            printz("${it.order.barista!!.name} - Pouring ${it.order.type} on pourer 2")
-            delay((Math.random() * 10000 + 2000).toLong())
-            printz("${it.order.barista!!.name} - Pouring ${it.order.type} Complete")
-            it.channel.send(true)
-            it.channel.close()
-        }
-    }
+    private val pourers = listOf(
+        initPourer("pourer 1", 2),
+        initPourer("pourer 2")
+    )
 
     suspend fun pour(order: Order) {
         /**
@@ -128,11 +123,10 @@ object BeverageMaker: CoroutineScope {
         select<Unit> {
             printz("${order.barista!!.name} - Waiting to pour")
             val channel = Channel<Boolean>()
-            pourer1.onSend(BeverageRequest(order, channel)) {
-                channel.receive()
-            }
-            pourer2.onSend(BeverageRequest(order, channel)) {
-                channel.receive()
+            pourers.forEach {
+                it.onSend(BeverageRequest(order, channel)) {
+                    channel.receive()
+                }
             }
         }
     }

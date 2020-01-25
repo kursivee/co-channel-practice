@@ -116,9 +116,13 @@ object BeverageMaker: CoroutineScope {
 
     suspend fun pour(order: Order) {
         /**
-         * For mental model purposes I'm calling this the "selection zone". Another analogy would be when you are
-         * figuring out the shortest line to go to to pay for your groceries.
+         * For mental model purposes I'm calling this the "selection zone".
+         * Some grocery stores have a dedicated person to facilitate which queue a customer goes to.
+         * The selector determines which queue to send the customer by constantly watching states of every queue.
          * 
+         * In this case, the select clause is watching each pourer. Once a pourer has room in their queue,
+         * the selector tells the barista to move to the pourer.
+         *
          * Select waits for the pourer to complete. Complete == channel.close()
          */
         select<Unit> {

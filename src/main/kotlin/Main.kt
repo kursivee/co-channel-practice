@@ -2,7 +2,6 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.*
 import kotlinx.coroutines.selects.select
 import java.time.LocalDateTime
-import kotlin.coroutines.CoroutineContext
 
 data class Order(
     val name: String,
@@ -38,31 +37,33 @@ fun main() {
         Barista("Pam Beesly")
     )
     runBlocking {
+        BeverageMaker.scope = this
         val queue = produceOrder(orders)
-        baristas.forEach {
-            launch {
-                for(order in queue) {
-                    order.barista = it
-                    printz(processOrder(order))
+        coroutineScope {
+            baristas.forEach {
+                launch {
+                    for(order in queue) {
+                        order.barista = it
+                        log(processOrder(order))
+                    }
                 }
             }
         }
+        println("Closing")
+        BeverageMaker.close()
     }
+
 }
 
 suspend fun processOrder(order: Order): String {
     delay(300)
-    printz("${order.barista!!.name} - ${order.type} for ${order.name} being made")
+    log("${order.barista!!.name} - ${order.type} for ${order.name} being made")
     return makingOrder(order)
 }
 
 suspend fun makingOrder(order: Order): String {
-    printz("${order.barista!!.name} - Making ${order.type} for ${order.name}")
-    coroutineScope {
-        async {
-            BeverageMaker.queue(order)
-        }
-    }.await()
+    log("${order.barista!!.name} - Making ${order.type} for ${order.name}")
+    BeverageMaker.queue(order)
     return "${order.barista!!.name} - ${order.type} for ${order.name} ready!"
 }
 
@@ -71,10 +72,8 @@ data class BeverageRequest(
     val channel: SendChannel<Boolean>
 )
 
-object BeverageMaker: CoroutineScope {
-    // How does coroutineContext affect implementation
-    override val coroutineContext: CoroutineContext = Job()
-
+object BeverageMaker {
+    var scope: CoroutineScope? = null
     /**
      * Still don't have a proper mental model of actor but it seems like it's just a coroutine with single responsibility.
      * In this case, the actor is a pourer whose job is to indicate when pouring is complete
@@ -94,34 +93,37 @@ object BeverageMaker: CoroutineScope {
      * pourer1 queue = [Michael Scott, Dwight Scrute, Pam Beesly]
      * pourer2 queue = []
      */
-    private fun initPourer(name: String, capacity: Int = 0): SendChannel<BeverageRequest> = actor(capacity = capacity) {
+    private fun initPourer(name: String, capacity: Int = 0): SendChannel<BeverageRequest> = scope!!.actor(capacity = capacity) {
+        // Need to figure the difference between consume and consume each. Consume seems to terminate the pourer.
         consumeEach {
-            printz("${it.order.barista!!.name} - Pouring ${it.order.type} on pourer $name")
+            log("${it.order.barista!!.name} - Pouring ${it.order.type} on $name")
             wait(2, 10)
-            printz("${it.order.barista!!.name} - Pouring ${it.order.type} Complete")
+            log("${it.order.barista!!.name} - Pouring ${it.order.type} Complete")
             it.channel.send(true)
             it.channel.close()
         }
     }
 
-    private val pourers = listOf(
-        initPourer("pourer 1"),
-        initPourer("pourer 2")
-    )
+    private val pourers by lazy {
+        listOf(
+            initPourer("pourer 1"),
+            initPourer("pourer 2")
+        )
+    }
 
     suspend fun queue(order: Order) {
         /**
          * For mental model purposes I'm calling this the "selection zone".
          * Some grocery stores have a dedicated person to facilitate which queue a customer goes to.
          * The selector determines which queue to send the customer by constantly watching states of every queue.
-         * 
+         *
          * In this case, the select clause is watching each pourer. Once a pourer has room in their queue,
          * the selector tells the barista to move to the pourer.
          *
          * Select waits for the pourer to complete. Complete == channel.close()
          */
         select<Unit> {
-            printz("${order.barista!!.name} - Waiting for open pourer")
+            log("${order.barista!!.name} - Waiting for open pourer")
             val channel = Channel<Boolean>()
             pourers.forEach {
                 it.onSend(BeverageRequest(order, channel)) {
@@ -130,9 +132,15 @@ object BeverageMaker: CoroutineScope {
             }
         }
     }
+
+    fun close() {
+        pourers.forEach {
+            it.close()
+        }
+    }
 }
 
-fun printz(s: String) {
+fun log(s: String) {
     println("[${LocalDateTime.now()}][${Thread.currentThread().name}] $s")
 }
 

@@ -3,6 +3,7 @@ package shop
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.consumeEach
+import java.util.*
 
 fun main() {
     val orders = mutableListOf<String>()
@@ -15,13 +16,13 @@ fun main() {
         shop.hire(Worker("Worker 2", this))
         shop.open()
         launch {
-            delay(30000)
+            delay(300000)
             shop.close()
         }
         while(shop.open) {
             orders.forEach {
-                shop.order(it)
-                delay(3000)
+                shop.order(MenuItem.Coffee())
+                delay(10000)
             }
         }
     }
@@ -38,8 +39,12 @@ class Shop(
         workers.add(worker)
     }
 
-    fun order(order: String ) {
-        orderScreen.add(order)
+    fun order(menuItem: MenuItem ) {
+        orderScreen.order(Order(
+            menuItem,
+            "Customer",
+            null
+        ))
     }
 
     fun open() {
@@ -58,90 +63,106 @@ class Shop(
 }
 
 class OrderScreen(scope: CoroutineScope): CoroutineScope by scope {
-    private val orders: MutableList<String> = mutableListOf()
-    private val pending: MutableList<String> = mutableListOf()
-    private val completed: MutableList<String> = mutableListOf()
-    val receiveChannel: Channel<OrderEvent> = Channel()
-    val sendChannel: Channel<String> = Channel()
+    private var orders: List<Order> = listOf()
+    val inbound: Channel<OrderEvent> = Channel()
+    val outbound: Channel<Order> = Channel()
 
     init {
         launch {
-            receiveChannel.consumeEach { event ->
+            inbound.consumeEach { event ->
                 when(event) {
-                    is OrderStarted -> {
-                        if(orders.removeIf { it == event.order }) {
-                            log("${event.owner} taking order ${event.order}")
-                            pending.add(event.order)
+                    is Ordered -> {
+                        orders = orders.toMutableList().also {
+                            it.add(event.order)
+                        }
+                        outbound.send(event.order)
+                    }
+                    is Started -> {
+                        orders = orders.map {
+                            if(it.id == event.order.id) {
+                                event.order
+                            } else {
+                                it
+                            }
                         }
                     }
-                    is OrderAdded -> {
-                        orders.add(event.order)
-                    }
-                    is OrderCanceled -> {
-                        if(pending.removeIf { it == event.order }) {
-                            log("${event.order} canceled")
-                            orders.add(event.order)
-                        }
-                    }
-                    is OrderCompleted -> {
-                        if(pending.removeIf { it == event.order }) {
-                            log("${event.owner} completed order ${event.order}")
-                            completed.add(event.order)
+                    is Completed -> {
+                        orders = orders.map {
+                            if(it.id == event.order.id) {
+                                event.order
+                            } else {
+                                it
+                            }
                         }
                     }
                 }
-                log("Current Orders = ${orders.joinToString(", ")}")
-                log("Processed Orders = ${pending.joinToString(", ")}")
-                log("Completed Orders = ${completed.joinToString(", ")}\n")
+                log("Orders = ${orders.filter { it.orderState == OrderState.ORDERED }.joinToString("\n")}")
+                log("In Progress = ${orders.filter { it.orderState == OrderState.IN_PROGRESS }.joinToString("\n")}")
+                log("Completed = ${orders.filter { it.orderState == OrderState.COMPLETED }.joinToString("\n")}\n")
             }
         }
     }
 
-    fun add(type: String) {
-        log("Cashier adding order $type")
+    fun order(order: Order) {
+        log("Customer ordered $order")
         launch {
-            receiveChannel.send(OrderAdded(type))
-            sendChannel.send(type)
+            inbound.send(Ordered(order))
         }
+    }
+
+    suspend fun start(order: Order) {
+        inbound.send(Started(order))
+    }
+
+    suspend fun complete(order: Order) {
+        inbound.send(Completed(order))
     }
 }
 
 class Worker(private val id: String, scope: CoroutineScope): CoroutineScope by scope {
     private var job: Job? = null
-    private var currentOrder: String? = null
-    private lateinit var channel: Channel<OrderEvent>
+    private lateinit var outbound: Channel<OrderEvent>
 
     fun startWorking(orderScreen: OrderScreen) {
-        channel = orderScreen.receiveChannel
+        outbound = orderScreen.inbound
         job = launch {
-            for(order in orderScreen.sendChannel) {
-                // This has potential to break since the job can be cancelled before
-                // setting the currentOrder. Better solution would be to maintain worker
-                // in OrderScreen
-                orderScreen.receiveChannel.send(OrderStarted(order, id))
-                currentOrder = order
-                wait(4000, 10000)
-                orderScreen.receiveChannel.send(OrderCompleted(order, id))
-                currentOrder = null
+            for(order in orderScreen.outbound) {
+                orderScreen.start(order.copy(workerId = id, orderState = OrderState.IN_PROGRESS))
+                wait(order.menuItem.prepTime)
+                // Not sure why workerId keeps resetting to null on complete
+                orderScreen.complete(order.copy(workerId = id, orderState = OrderState.COMPLETED))
             }
         }
     }
 
     fun stopWorking() {
         job?.cancel()
-        runBlocking {
-            currentOrder?.let {
-                channel.send(OrderCanceled(it, id))
-            }
-        }
     }
 }
 
 sealed class OrderEvent
-data class OrderAdded(val order: String): OrderEvent()
-data class OrderStarted(val order: String, val owner: String): OrderEvent()
-data class OrderCanceled(val order: String, val owner: String): OrderEvent()
-data class OrderCompleted(val order: String, val owner: String): OrderEvent()
+data class Ordered(val order: Order): OrderEvent()
+data class Started(val order: Order): OrderEvent()
+data class Completed(val order: Order): OrderEvent()
+
+
+enum class OrderState {
+    ORDERED,
+    IN_PROGRESS,
+    COMPLETED
+}
+
+data class Order(
+    val menuItem: MenuItem, val customer: String,
+    val workerId: String?,
+    val orderState: OrderState = OrderState.ORDERED,
+    val id: String = UUID.randomUUID().toString()
+)
+
+sealed class MenuItem {
+    abstract val prepTime: Pair<Int, Int>
+    data class Coffee(override val prepTime: Pair<Int, Int> = 2000 to 10000): MenuItem()
+}
 
 
 fun log(s: String) {
@@ -154,4 +175,8 @@ suspend fun wait(min: Int, max: Int = -1) {
     } else {
         delay((Math.random() * max + min).toLong())
     }
+}
+
+suspend fun wait(pair: Pair<Int, Int>) {
+    wait(pair.first, pair.second)
 }
